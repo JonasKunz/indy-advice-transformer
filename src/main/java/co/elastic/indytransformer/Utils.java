@@ -5,7 +5,6 @@ import com.github.javaparser.ast.Node;
 import com.github.javaparser.ast.NodeList;
 import com.github.javaparser.ast.body.ClassOrInterfaceDeclaration;
 import com.github.javaparser.ast.body.MethodDeclaration;
-import com.github.javaparser.ast.body.Parameter;
 import com.github.javaparser.ast.expr.AnnotationExpr;
 import com.github.javaparser.ast.expr.AssignExpr;
 import com.github.javaparser.ast.expr.Expression;
@@ -18,13 +17,10 @@ import com.github.javaparser.ast.nodeTypes.NodeWithAnnotations;
 import com.github.javaparser.resolution.Context;
 import com.github.javaparser.resolution.TypeSolver;
 import com.github.javaparser.resolution.declarations.ResolvedTypeDeclaration;
-import com.github.javaparser.resolution.declarations.ResolvedValueDeclaration;
 import com.github.javaparser.resolution.model.SymbolReference;
 import com.github.javaparser.symbolsolver.javaparsermodel.JavaParserFactory;
-import net.bytebuddy.asm.Advice;
 
 import java.util.Optional;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Predicate;
 import java.util.stream.Collector;
 import java.util.stream.Collectors;
@@ -124,15 +120,15 @@ public class Utils {
         return false;
     }
 
-    public static <T> Collector<T,?,Optional<T>> atMostOne() {
+    public static <T> Collector<T, ?, Optional<T>> atMostOne() {
         return Collectors.collectingAndThen(Collectors.toList(), elements -> {
-           if (elements.isEmpty()) {
-               return Optional.empty();
-           }
-           if (elements.size() == 1) {
-               return Optional.of(elements.get(0));
-           }
-           throw new IllegalStateException("Expected at most one element: " + elements);
+            if (elements.isEmpty()) {
+                return Optional.empty();
+            }
+            if (elements.size() == 1) {
+                return Optional.of(elements.get(0));
+            }
+            throw new IllegalStateException("Expected at most one element: " + elements);
         });
     }
 
@@ -155,7 +151,7 @@ public class Utils {
 
     public static void addImports(MethodDeclaration method, Class<?>... classesToImport) {
         CompilationUnit compilationUnit = method.findCompilationUnit().get();
-        for(Class<?> clazz : classesToImport) {
+        for (Class<?> clazz : classesToImport) {
             compilationUnit.addImport(clazz);
         }
     }

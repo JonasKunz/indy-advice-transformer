@@ -2,7 +2,6 @@ package co.elastic.indytransformer;
 
 import com.github.javaparser.StaticJavaParser;
 import com.github.javaparser.ast.Modifier;
-import com.github.javaparser.ast.Node;
 import com.github.javaparser.ast.NodeList;
 import com.github.javaparser.ast.body.ClassOrInterfaceDeclaration;
 import com.github.javaparser.ast.body.FieldDeclaration;
@@ -31,18 +30,15 @@ import com.github.javaparser.ast.type.PrimitiveType;
 import com.github.javaparser.ast.type.Type;
 import com.github.javaparser.ast.visitor.ModifierVisitor;
 import com.github.javaparser.printer.lexicalpreservation.GeneratedClassCleaner;
-import com.github.javaparser.printer.lexicalpreservation.LexicalPreservingPrinter;
 import com.github.javaparser.resolution.TypeSolver;
 import com.github.javaparser.resolution.declarations.ResolvedValueDeclaration;
 import com.github.javaparser.resolution.model.SymbolReference;
 import com.github.javaparser.symbolsolver.javaparsermodel.JavaParserFacade;
 import com.github.javaparser.symbolsolver.javaparsermodel.declarations.JavaParserParameterDeclaration;
 import com.google.common.collect.Streams;
-import javassist.expr.Expr;
 import net.bytebuddy.asm.Advice;
 
 import java.util.ArrayList;
-import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -225,7 +221,8 @@ public class AdviceLocals {
         }
     }
 
-    record ExitTransformResult(Parameter adviceEnterParameter,VariableDeclarator localsUnpackingDeclaration){}
+    record ExitTransformResult(Parameter adviceEnterParameter, VariableDeclarator localsUnpackingDeclaration) {
+    }
 
     public ExitTransformResult transformExitMethod(MethodDeclaration exitMethod, boolean enterHasMultipleReturnValues) {
 
@@ -250,7 +247,7 @@ public class AdviceLocals {
             Type objectArrayType = StaticJavaParser.parseType("Object[]");
             adviceEnterParameter = new Parameter(objectArrayType, "enterResult");
             ArrayAccessExpr arrayAccess = new ArrayAccessExpr(new NameExpr("enterResult"), new IntegerLiteralExpr(String.valueOf(0)));
-            localsUnpackingDeclaration = new VariableDeclarator(type, name, new CastExpr(type,arrayAccess));
+            localsUnpackingDeclaration = new VariableDeclarator(type, name, new CastExpr(type, arrayAccess));
             exitMethod.getBody().get().addAndGetStatement(0, new ExpressionStmt(new VariableDeclarationExpr(localsUnpackingDeclaration)));
         }
         adviceEnterParameter.addAnnotation(new MarkerAnnotationExpr("Advice.Enter"));
