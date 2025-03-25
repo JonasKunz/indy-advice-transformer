@@ -21,7 +21,7 @@ public class Main {
         Path rootDir = Paths.get(args[0]);
 
         List<Path> javaFiles;
-        try (Stream<Path> fileStream = Files.walk(Paths.get("/Users/jonas/git/otel/opentelemetry-java-instrumentation/instrumentation"))) {
+        try (Stream<Path> fileStream = Files.walk(rootDir)) {
             javaFiles = fileStream
                     .filter(file -> file.toString().endsWith(".java"))
                     .toList();
