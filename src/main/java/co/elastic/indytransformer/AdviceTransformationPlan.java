@@ -42,6 +42,7 @@ import com.google.common.collect.Streams;
 import net.bytebuddy.asm.Advice;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
@@ -71,7 +72,7 @@ public class AdviceTransformationPlan {
 
     private final AdviceLocals locals;
 
-    public AdviceTransformationPlan(ClassOrInterfaceDeclaration adviceClass, TypeSolver typeSolver) {
+    private AdviceTransformationPlan(ClassOrInterfaceDeclaration adviceClass, TypeSolver typeSolver) {
         this.typeSolver = typeSolver;
         this.adviceClass = adviceClass;
         enterMethod = Utils.findAnnotatedMethod(adviceClass, ADVICE_ON_METHOD_ENTER, typeSolver).orElse(null);
@@ -124,15 +125,6 @@ public class AdviceTransformationPlan {
         return Optional.of(new AdviceTransformationPlan(maybeAdviceClass, typeSolver));
     }
 
-    private static Stream<Parameter> findNonReadOnlyParameters(MethodDeclaration method, String annotationFqn, TypeSolver typeSolver) {
-        return method.getParameters().stream()
-                .filter(param -> Utils.getAnnotation(param, annotationFqn, typeSolver)
-                        .stream()
-                        .flatMap(anno -> Utils.extractAnnotationArgumentValue(anno, "readOnly").stream())
-                        .anyMatch(readonlyValue -> Utils.resolveBooleanLiteral(readonlyValue) == false)
-                );
-    }
-
 
     public boolean transform() {
 
@@ -153,18 +145,60 @@ public class AdviceTransformationPlan {
         }
 
         List<ValueToReturn<?>> enterReturnValues = new ArrayList<>();
-
         if (locals != null) {
             enterReturnValues.add(locals.transformEnterMethod(enterMethod));
         }
+        enterReturnValues.addAll(transformFieldAssignments(enterWrittenFieldValues));
+        enterReturnValues.addAll(transformArgumentAssignments(enterWrittenArguments));
 
-        enterReturnValues.addAll(collectFieldAssignments(enterWrittenFieldValues));
+        replaceReturnValueAndAddAnnotations(enterMethod, enterReturnValues);
+        enterReturnValues.forEach(val -> removeParameterOrVariableIfNeverUsed(enterMethod, val.parameterOrVariable()));
+
+        Parameter adviceEnterParameter = null;
+        VariableDeclarator localsUnpackingDeclaration = null;
+        if (locals != null) {
+            AdviceLocals.ExitTransformResult exitTransformResult = locals.transformExitMethod(exitMethod, enterReturnValues.size() > 1);
+            adviceEnterParameter = exitTransformResult.adviceEnterParameter();
+            localsUnpackingDeclaration = exitTransformResult.localsUnpackingDeclaration();
+        }
+
+        List<ValueToReturn<?>> exitReturnValues = new ArrayList<>();
+
+        if (assignedReturnParam != null) {
+            exitReturnValues.add(transformReturnValueAssignment(assignedReturnParam));
+        }
+
+        exitReturnValues.addAll(transformFieldAssignments(exitWrittenFieldValues));
+
+        replaceReturnValueAndAddAnnotations(exitMethod, exitReturnValues);
+        if (localsUnpackingDeclaration != null) {
+            removeParameterOrVariableIfNeverUsed(exitMethod, localsUnpackingDeclaration);
+        }
+        if (adviceEnterParameter != null) {
+            removeParameterOrVariableIfNeverUsed(exitMethod, adviceEnterParameter);
+        }
+        exitReturnValues.forEach(val -> removeParameterOrVariableIfNeverUsed(exitMethod, val.parameterOrVariable()));
+
+        return true;
+    }
+
+    private static Stream<Parameter> findNonReadOnlyParameters(MethodDeclaration method, String annotationFqn, TypeSolver typeSolver) {
+        return method.getParameters().stream()
+                .filter(param -> Utils.getAnnotation(param, annotationFqn, typeSolver)
+                        .stream()
+                        .flatMap(anno -> Utils.extractAnnotationArgumentValue(anno, "readOnly").stream())
+                        .anyMatch(readonlyValue -> Utils.resolveBooleanLiteral(readonlyValue) == false)
+                );
+    }
+
+    private List<ValueToReturn<?>> transformArgumentAssignments(List<Parameter> enterWrittenArguments) {
+        List<ValueToReturn<?>> returns = new ArrayList<>();
         for (Parameter writtenArg : enterWrittenArguments) {
             AnnotationExpr anno = Utils.getAnnotation(writtenArg, ADVICE_ARGUMENT, typeSolver).get();
             int argIndex = Utils.extractIntLiteral(Utils.extractAnnotationArgumentValue(anno, "value").get());
             anno.replace(Utils.removeAnnotationArgumentValue(anno, "readOnly"));
 
-            enterReturnValues.add(new ValueToReturn<>(writtenArg, (method, index) -> {
+            returns.add(new ValueToReturn<>(writtenArg, (method, index) -> {
                 Utils.addImports(method, Advice.AssignReturned.class, Advice.AssignReturned.ToArguments.ToArgument.class);
                 SingleMemberAnnotationExpr toArguments = findOrCreateRepeatableWrapperAnnotation(method, "AssignReturned.ToArguments");
                 ArrayInitializerExpr toArgumentsInitializerList = (ArrayInitializerExpr) (toArguments).getMemberValue();
@@ -182,54 +216,27 @@ public class AdviceTransformationPlan {
                 }
             }));
         }
+        return returns;
+    }
 
+    private ValueToReturn<?> transformReturnValueAssignment(Parameter returnValueParameter) {
+        AnnotationExpr assignReturnedExpr = Utils.getAnnotation(returnValueParameter, ADVICE_RETURN, typeSolver).get();
+        assignReturnedExpr.replace(Utils.removeAnnotationArgumentValue(assignReturnedExpr, "readOnly"));
 
-        replaceReturnValueAndAddAnnotations(enterMethod, enterReturnValues);
-        enterReturnValues.forEach(val -> removeParameterOrVariableIfNeverUsed(enterMethod, val.parameterOrVariable()));
-
-        Parameter adviceEnterParameter = null;
-        VariableDeclarator localsUnpackingDeclaration = null;
-
-        if (locals != null) {
-            AdviceLocals.ExitTransformResult exitTransformResult = locals.transformExitMethod(exitMethod, enterReturnValues.size() > 1);
-            adviceEnterParameter = exitTransformResult.adviceEnterParameter();
-            localsUnpackingDeclaration = exitTransformResult.localsUnpackingDeclaration();
-        }
-
-        List<ValueToReturn<?>> exitReturnValues = new ArrayList<>();
-        if (assignedReturnParam != null) {
-
-            AnnotationExpr assignReturnedExpr = Utils.getAnnotation(assignedReturnParam, ADVICE_RETURN, typeSolver).get();
-            assignReturnedExpr.replace(Utils.removeAnnotationArgumentValue(assignReturnedExpr, "readOnly"));
-
-            exitReturnValues.add(new ValueToReturn<>(assignedReturnParam, (method, index) -> {
-                Utils.addImports(method, Advice.AssignReturned.class);
-                Name annoName = new Name("AssignReturned.ToReturned");
-                AnnotationExpr result;
-                if (index == -1) {
-                    result = new MarkerAnnotationExpr(annoName);
-                } else {
-                    result = new NormalAnnotationExpr(
-                            annoName, new NodeList<>(
-                            new MemberValuePair("index", new IntegerLiteralExpr(String.valueOf(index)))
-                    ));
-                }
-                insertBeforeMethodEnterOrExitAnnotation(method, result);
-            }));
-        }
-
-        exitReturnValues.addAll(collectFieldAssignments(exitWrittenFieldValues));
-
-        replaceReturnValueAndAddAnnotations(exitMethod, exitReturnValues);
-        if (localsUnpackingDeclaration != null) {
-            removeParameterOrVariableIfNeverUsed(exitMethod, localsUnpackingDeclaration);
-        }
-        if (adviceEnterParameter != null) {
-            removeParameterOrVariableIfNeverUsed(exitMethod, adviceEnterParameter);
-        }
-        exitReturnValues.forEach(val -> removeParameterOrVariableIfNeverUsed(exitMethod, val.parameterOrVariable()));
-
-        return true;
+        return new ValueToReturn<>(returnValueParameter, (method, index) -> {
+            Utils.addImports(method, Advice.AssignReturned.class);
+            Name annoName = new Name("AssignReturned.ToReturned");
+            AnnotationExpr result;
+            if (index == -1) {
+                result = new MarkerAnnotationExpr(annoName);
+            } else {
+                result = new NormalAnnotationExpr(
+                        annoName, new NodeList<>(
+                        new MemberValuePair("index", new IntegerLiteralExpr(String.valueOf(index)))
+                ));
+            }
+            insertBeforeMethodEnterOrExitAnnotation(method, result);
+        });
     }
 
     private SingleMemberAnnotationExpr findOrCreateRepeatableWrapperAnnotation(MethodDeclaration method, String wrapperAnnotationName) {
@@ -259,7 +266,7 @@ public class AdviceTransformationPlan {
     }
 
 
-    private List<ValueToReturn<Parameter>> collectFieldAssignments(List<Parameter> fieldAssignmentParameters) {
+    private List<ValueToReturn<Parameter>> transformFieldAssignments(List<Parameter> fieldAssignmentParameters) {
         return fieldAssignmentParameters.stream()
                 .map(writtenField -> {
                     AnnotationExpr anno = Utils.getAnnotation(writtenField, ADVICE_FIELDVALUE, typeSolver).get();
@@ -405,7 +412,6 @@ public class AdviceTransformationPlan {
                                 .filter(expr -> expr.getNameAsString().equals(assignedName))
                                 .toList();
                         if (matchingReturnValues.size() == 1) {
-                            // TODO preserver comments in order
                             if (prevStatement.getComment().isPresent()) {
                                 Comment comment = prevStatement.getComment().get();
                                 additionalOrphanComments.add(0, comment);
