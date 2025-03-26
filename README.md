@@ -31,17 +31,17 @@ Here is an example diff of a performed transformation:
 ```diff
 public class WriteOnlyReturn {
 
-+     @AssignReturned.ToReturned
++   @AssignReturned.ToReturned
     @Advice.OnMethodExit(suppress = Throwable.class, onThrowable = Throwable.class)
--     public static void overrideReturn(@Advice.Return(readOnly = false) String instrumetedReturn, @Advice.Thrown Throwable error) {
-+     public static String overrideReturn(@Advice.Return String instrumetedReturn, @Advice.Thrown Throwable error) {
+-   public static void overrideReturn(@Advice.Return(readOnly = false) String instrumetedReturn, @Advice.Thrown Throwable error) {
++   public static String overrideReturn(@Advice.Return String instrumetedReturn, @Advice.Thrown Throwable error) {
         if (error != null) {
--             instrumetedReturn = "foo";
--             return;
-+             return "foo";
+-           instrumetedReturn = "foo";
+-           return;
++           return "foo";
         }
--        instrumetedReturn = instrumetedReturn + "bar";
-+        return instrumetedReturn + "bar";
+-       instrumetedReturn = instrumetedReturn + "bar";
++       return instrumetedReturn + "bar";
     }
 
 }
@@ -59,20 +59,20 @@ Here is an example of this transformation:
 public class SingleLocalAdvice {
 
     @Advice.OnMethodEnter(suppress = Throwable.class)
--     public static void enter(@Advice.Local("fooName") String fooLocal) {
--         fooLocal = "Hello World";
-+     public static String enter() {
-+        return "Hello World";
+-   public static void enter(@Advice.Local("fooName") String fooLocal) {
+-       fooLocal = "Hello World";
++   public static String enter() {
++      return "Hello World";
     }
 
-+     @AssignReturned.ToReturned
++   @AssignReturned.ToReturned
     @Advice.OnMethodExit(suppress = Throwable.class, onThrowable = Throwable.class)
--     public static void overrideReturn(@Advice.Return(readOnly = false) String returnVal,
--                                       @Advice.Local("fooName") String fooLocal) {
-+     public static String overrideReturn(@Advice.Enter String fooLocal
-+     ) {
--         returnVal = fooLocal;
-+         return fooLocal;
+-   public static void overrideReturn(@Advice.Return(readOnly = false) String returnVal,
+-                                     @Advice.Local("fooName") String fooLocal) {
++   public static String overrideReturn(@Advice.Enter String fooLocal
++   ) {
+-       returnVal = fooLocal;
++       return fooLocal;
     }
 
 }
@@ -85,15 +85,15 @@ Of course, multiple of the transformations can be required at the same time, but
 ``` diff
 public class WriteFieldAndReturn {
 
-+     @AssignReturned.ToReturned(index = 0)
-+     @AssignReturned.ToFields({ @ToField(value = "myOtherField", index = 1) })
++   @AssignReturned.ToReturned(index = 0)
++   @AssignReturned.ToFields({ @ToField(value = "myOtherField", index = 1) })
     @Advice.OnMethodExit(suppress = Throwable.class, onThrowable = Throwable.class)
--     public static void overrideReturn(@Advice.Return(readOnly = false) String instrumetedReturn,
--                                       @Advice.FieldValue(value = "myOtherField", readOnly = false) String stringField) {
--         stringField = "Hello World";
--         instrumetedReturn = "foobar";
-+     public static Object[] overrideReturn() {
-+         return new Object[] { "foobar", "Hello World" };
+-   public static void overrideReturn(@Advice.Return(readOnly = false) String instrumetedReturn,
+-                                     @Advice.FieldValue(value = "myOtherField", readOnly = false) String stringField) {
+-       stringField = "Hello World";
+-       instrumetedReturn = "foobar";
++   public static Object[] overrideReturn() {
++       return new Object[] { "foobar", "Hello World" };
     }
 }
 ```
