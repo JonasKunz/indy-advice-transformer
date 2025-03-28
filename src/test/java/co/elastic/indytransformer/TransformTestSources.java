@@ -98,4 +98,9 @@ public class TransformTestSources {
         transformAndPrintDiff("/ComplexEnter.java");
     }
 
+    @Test
+    public void preserveAssignmentOrderInReturn() {
+        transformAndPrintDiff("/PreserveOrderInOptimizedReturns.java");
+    }
+
 }

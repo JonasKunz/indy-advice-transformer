@@ -46,6 +46,7 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -411,16 +412,31 @@ public class AdviceTransformationPlan {
                         List<NameExpr> matchingReturnValues = returnedVariables.stream()
                                 .filter(expr -> expr.getNameAsString().equals(assignedName))
                                 .toList();
+
                         if (matchingReturnValues.size() == 1) {
-                            if (prevStatement.getComment().isPresent()) {
-                                Comment comment = prevStatement.getComment().get();
-                                additionalOrphanComments.add(0, comment);
+                            Set<String> otherVarNames = returnedVariables.stream()
+                                    .filter(name -> name != matchingReturnValues)
+                                    .map(name -> name.getNameAsString())
+                                    .collect(Collectors.toSet());
+
+                            AtomicBoolean valueReferencesAnyOtherReturnValue = new AtomicBoolean(false);
+                            assignExpr.getValue().walk(NameExpr.class, name -> {
+                                if ( otherVarNames.contains(name.getNameAsString()) ) {
+                                    valueReferencesAnyOtherReturnValue.set(true);
+                                }
+                            });
+                            if (!valueReferencesAnyOtherReturnValue.get()) {
+
+                                if (prevStatement.getComment().isPresent()) {
+                                    Comment comment = prevStatement.getComment().get();
+                                    additionalOrphanComments.add(0, comment);
+                                }
+                                prevStatement.remove();
+                                NameExpr replacedReturnExpression = matchingReturnValues.get(0);
+                                replacedReturnExpression.replace(assignExpr.getValue());
+                                returnedVariables.remove(replacedReturnExpression);
+                                continueOptimizing = true;
                             }
-                            prevStatement.remove();
-                            NameExpr replacedReturnExpression = matchingReturnValues.get(0);
-                            replacedReturnExpression.replace(assignExpr.getValue());
-                            returnedVariables.remove(replacedReturnExpression);
-                            continueOptimizing = true;
                         }
                     }
                 }
