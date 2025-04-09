@@ -103,4 +103,9 @@ public class TransformTestSources {
         transformAndPrintDiff("/PreserveOrderInOptimizedReturns.java");
     }
 
+    @Test
+    public void virtualFields() {
+        transformAndPrintDiff("/VirtualFieldsAdvice.java");
+    }
+
 }

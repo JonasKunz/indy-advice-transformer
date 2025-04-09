@@ -2,10 +2,12 @@ package co.elastic.indytransformer;
 
 import com.github.javaparser.StaticJavaParser;
 import com.github.javaparser.ast.ArrayCreationLevel;
+import com.github.javaparser.ast.Modifier;
 import com.github.javaparser.ast.Node;
 import com.github.javaparser.ast.NodeList;
 import com.github.javaparser.ast.body.BodyDeclaration;
 import com.github.javaparser.ast.body.ClassOrInterfaceDeclaration;
+import com.github.javaparser.ast.body.FieldDeclaration;
 import com.github.javaparser.ast.body.MethodDeclaration;
 import com.github.javaparser.ast.body.Parameter;
 import com.github.javaparser.ast.body.VariableDeclarator;
@@ -14,13 +16,17 @@ import com.github.javaparser.ast.expr.AnnotationExpr;
 import com.github.javaparser.ast.expr.ArrayCreationExpr;
 import com.github.javaparser.ast.expr.ArrayInitializerExpr;
 import com.github.javaparser.ast.expr.AssignExpr;
+import com.github.javaparser.ast.expr.ClassExpr;
 import com.github.javaparser.ast.expr.Expression;
+import com.github.javaparser.ast.expr.FieldAccessExpr;
 import com.github.javaparser.ast.expr.IntegerLiteralExpr;
 import com.github.javaparser.ast.expr.MarkerAnnotationExpr;
 import com.github.javaparser.ast.expr.MemberValuePair;
+import com.github.javaparser.ast.expr.MethodCallExpr;
 import com.github.javaparser.ast.expr.Name;
 import com.github.javaparser.ast.expr.NameExpr;
 import com.github.javaparser.ast.expr.NormalAnnotationExpr;
+import com.github.javaparser.ast.expr.SimpleName;
 import com.github.javaparser.ast.expr.SingleMemberAnnotationExpr;
 import com.github.javaparser.ast.expr.VariableDeclarationExpr;
 import com.github.javaparser.ast.nodeTypes.NodeWithSimpleName;
@@ -30,21 +36,30 @@ import com.github.javaparser.ast.stmt.ExpressionStmt;
 import com.github.javaparser.ast.stmt.ReturnStmt;
 import com.github.javaparser.ast.stmt.Statement;
 import com.github.javaparser.ast.type.ArrayType;
+import com.github.javaparser.ast.type.ClassOrInterfaceType;
 import com.github.javaparser.ast.type.Type;
 import com.github.javaparser.ast.visitor.VoidVisitorAdapter;
+import com.github.javaparser.printer.lexicalpreservation.GeneratedClassCleaner;
+import com.github.javaparser.resolution.Context;
 import com.github.javaparser.resolution.TypeSolver;
+import com.github.javaparser.resolution.declarations.ResolvedTypeDeclaration;
 import com.github.javaparser.resolution.declarations.ResolvedValueDeclaration;
 import com.github.javaparser.resolution.model.SymbolReference;
 import com.github.javaparser.symbolsolver.javaparsermodel.JavaParserFacade;
+import com.github.javaparser.symbolsolver.javaparsermodel.JavaParserFactory;
 import com.github.javaparser.symbolsolver.javaparsermodel.declarations.JavaParserParameterDeclaration;
 import com.github.javaparser.symbolsolver.javaparsermodel.declarations.JavaParserVariableDeclaration;
+import com.github.javaparser.utils.Pair;
 import com.google.common.collect.Streams;
 import net.bytebuddy.asm.Advice;
 
+import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -115,6 +130,7 @@ public class AdviceTransformationPlan {
         if (!enterMethod.isPresent() && !exitMethod.isPresent()) {
             return Optional.empty();
         }
+        /*
 
         boolean isAlreadyMigrated = Streams.concat(enterMethod.stream(), exitMethod.stream())
                 .anyMatch(method -> Utils.getAnnotation(method, anno -> anno.startsWith(ASSIGNRETURNED_CLASS), typeSolver).isPresent());
@@ -122,12 +138,14 @@ public class AdviceTransformationPlan {
         if (isAlreadyMigrated) {
             return Optional.empty();
         }
+         */
 
         return Optional.of(new AdviceTransformationPlan(maybeAdviceClass, typeSolver));
     }
 
-
     public boolean transform() {
+        return extractVirtualFields();
+        /*
 
         if (enterWrittenArguments.isEmpty()
             && enterWrittenFieldValues.isEmpty()
@@ -181,6 +199,101 @@ public class AdviceTransformationPlan {
         exitReturnValues.forEach(val -> removeParameterOrVariableIfNeverUsed(exitMethod, val.parameterOrVariable()));
 
         return true;
+        */
+    }
+
+    private boolean extractVirtualFields() {
+        Map<Pair<Type, Type>, List<MethodCallExpr>> calls = new HashMap<>();
+        if (enterMethod != null) {
+            collectVirtualFields(enterMethod, calls);
+        }
+        if (exitMethod != null) {
+            collectVirtualFields(exitMethod, calls);
+        }
+
+
+        if (calls.isEmpty()) {
+            return false;
+        }
+
+        ClassOrInterfaceDeclaration clazz = new ClassOrInterfaceDeclaration(new NodeList<>(
+                Modifier.publicModifier(),
+                Modifier.staticModifier()
+        ), false, "VirtualFields");
+
+        calls.forEach((carriedAndFieldTypes, findCalls) -> {
+            Type carrier = carriedAndFieldTypes.a;
+            Type field = carriedAndFieldTypes.b;
+            String name = toUpperSnakeCase(carrier.toString())+"_"+toUpperSnakeCase(field.toString());
+
+            Type constantType = new ClassOrInterfaceType(null, new SimpleName("VirtualField"), new NodeList<>(carrier, field));
+            Expression initializer = new MethodCallExpr(new NameExpr("VirtualField"), "find", new NodeList<>(
+                    new ClassExpr(carrier), new ClassExpr(field)
+            ));
+
+            clazz.addMember(new FieldDeclaration(new NodeList<>(Modifier.publicModifier(), Modifier.staticModifier(), Modifier.finalModifier()), new VariableDeclarator(constantType, name, initializer)));
+
+            for (MethodCallExpr call : findCalls) {
+                call.replace(new FieldAccessExpr(new NameExpr("VirtualFields"), name));
+            }
+        });
+
+        //By default, the printer generates to many unnecessary empty lines for our style, so we remove them
+        GeneratedClassCleaner.cleanup(clazz);
+
+        MethodDeclaration insertBefore = enterMethod == null ? exitMethod : enterMethod;
+
+        ClassOrInterfaceDeclaration adviceClass = (ClassOrInterfaceDeclaration) insertBefore.getParentNode().get();
+        NodeList<BodyDeclaration<?>> members = adviceClass.getMembers();
+        int insertionIndex = members.indexOf(insertBefore);
+        members.add(insertionIndex, clazz);
+
+        return true;
+    }
+
+    private String toUpperSnakeCase(String string) {
+        List<String> segments = new ArrayList<>();
+        StringBuilder currentSegment = new StringBuilder();
+        for (int i = 0; i < string.length(); i++) {
+            char c = string.charAt(i);
+
+            if (c == '.') {
+                segments.add(currentSegment.toString());
+                currentSegment.setLength(0);
+                continue;
+            }
+
+            if (Character.isUpperCase(c)) {
+                segments.add(currentSegment.toString());
+                currentSegment.setLength(0);
+            }
+            currentSegment.append(Character.toUpperCase(c));
+        }
+        segments.add(currentSegment.toString());
+        return segments.stream()
+                .filter(str -> !str.isEmpty())
+                .collect(Collectors.joining("_"));
+    }
+
+    private void collectVirtualFields(MethodDeclaration enterMethod, Map<Pair<Type, Type>, List<MethodCallExpr>> callsByField) {
+        enterMethod.getBody().get().walk(MethodCallExpr.class, call -> {
+
+            if (!"find".equals(call.getNameAsString()) || !call.getScope().isPresent() || call.getArguments().size() != 2) {
+                return;
+            }
+            Expression scope = call.getScope().get();
+            if (!scope.isNameExpr() || !((NameExpr) scope).getNameAsString().endsWith("VirtualField")) {
+                return;
+            }
+            Expression carrierClassExpr = call.getArgument(0);
+            Expression fieldTypeExpr = call.getArgument(1);
+            if(!carrierClassExpr.isClassExpr() || !fieldTypeExpr.isClassExpr()) {
+                return;
+            }
+            Type carrierType = carrierClassExpr.asClassExpr().getType();
+            Type fieldType = fieldTypeExpr.asClassExpr().getType();
+            callsByField.computeIfAbsent(new Pair<>(carrierType, fieldType), k -> new ArrayList<>()).add(call);
+        });
     }
 
     private static Stream<Parameter> findNonReadOnlyParameters(MethodDeclaration method, String annotationFqn, TypeSolver typeSolver) {

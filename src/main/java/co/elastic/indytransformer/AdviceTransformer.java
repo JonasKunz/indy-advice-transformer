@@ -27,7 +27,7 @@ public class AdviceTransformer {
         typeSolver = new ReflectionTypeSolver(true) {
             @Override
             protected boolean filterName(String name) {
-                return super.filterName(name) || name.startsWith("net.bytebuddy");
+                return super.filterName(name) || name.startsWith("net.bytebuddy") || name.startsWith("io.opentelemetry.instrumentation.api");
             }
         };
         parser = new JavaParser(new ParserConfiguration()
