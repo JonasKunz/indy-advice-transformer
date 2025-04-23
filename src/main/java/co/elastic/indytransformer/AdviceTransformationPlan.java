@@ -202,19 +202,20 @@ public class AdviceTransformationPlan {
             returns.add(new ValueToReturn<>(writtenArg, (method, index) -> {
                 Utils.addImports(method, Advice.AssignReturned.class, Advice.AssignReturned.ToArguments.ToArgument.class);
                 SingleMemberAnnotationExpr toArguments = findOrCreateRepeatableWrapperAnnotation(method, "AssignReturned.ToArguments");
-                ArrayInitializerExpr toArgumentsInitializerList = (ArrayInitializerExpr) (toArguments).getMemberValue();
 
+                AnnotationExpr result;
                 Name annoName = new Name("ToArgument");
                 IntegerLiteralExpr argIndexExpr = new IntegerLiteralExpr(String.valueOf(argIndex));
                 if (index == -1) {
-                    toArgumentsInitializerList.getValues().add(new SingleMemberAnnotationExpr(annoName, argIndexExpr));
+                    result = new SingleMemberAnnotationExpr(annoName, argIndexExpr);
                 } else {
-                    toArgumentsInitializerList.getValues().add(new NormalAnnotationExpr(
+                    result = new NormalAnnotationExpr(
                             annoName, new NodeList<>(
                             new MemberValuePair("value", argIndexExpr),
                             new MemberValuePair("index", new IntegerLiteralExpr(String.valueOf(index)))
-                    )));
+                    ));
                 }
+                addToArrayAnnotationValue(toArguments, result);
             }));
         }
         return returns;
@@ -279,7 +280,6 @@ public class AdviceTransformationPlan {
                         Utils.addImports(method, Advice.AssignReturned.class, Advice.AssignReturned.ToFields.ToField.class);
 
                         SingleMemberAnnotationExpr toFields = findOrCreateRepeatableWrapperAnnotation(method, "AssignReturned.ToFields");
-                        ArrayInitializerExpr toFieldsInitializerList = (ArrayInitializerExpr) (toFields).getMemberValue();
 
                         AnnotationExpr result;
                         Name annoName = new Name("ToField");
@@ -292,10 +292,27 @@ public class AdviceTransformationPlan {
                                     new MemberValuePair("index", new IntegerLiteralExpr(String.valueOf(index)))
                             ));
                         }
-                        toFieldsInitializerList.getValues().add(result);
+                        addToArrayAnnotationValue(toFields, result);
                     });
                 })
                 .toList();
+    }
+
+    private static void addToArrayAnnotationValue(SingleMemberAnnotationExpr containerAnnotation, AnnotationExpr valueToAdd) {
+        Expression originalValue = containerAnnotation.getMemberValue();
+        ArrayInitializerExpr newArrayValue = new ArrayInitializerExpr();
+        if (originalValue instanceof ArrayInitializerExpr originalArray) {
+            newArrayValue = originalArray;
+        } else {
+            newArrayValue.getValues().add(originalValue);
+        }
+        newArrayValue.getValues().add(valueToAdd);
+        if (newArrayValue.getValues().size() == 1) {
+            // No need to wrap in array initializer expression if we have exactly one element
+            containerAnnotation.setMemberValue(newArrayValue.getValues().get(0));
+        } else {
+            containerAnnotation.setMemberValue(newArrayValue);
+        }
     }
 
 
