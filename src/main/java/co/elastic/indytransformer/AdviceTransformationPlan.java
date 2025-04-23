@@ -414,8 +414,9 @@ public class AdviceTransformationPlan {
                                 .toList();
 
                         if (matchingReturnValues.size() == 1) {
+                            NameExpr replacedReturnExpression = matchingReturnValues.get(0);
                             Set<String> otherVarNames = returnedVariables.stream()
-                                    .filter(name -> name != matchingReturnValues)
+                                    .filter(name -> name != replacedReturnExpression)
                                     .map(name -> name.getNameAsString())
                                     .collect(Collectors.toSet());
 
@@ -432,7 +433,6 @@ public class AdviceTransformationPlan {
                                     additionalOrphanComments.add(0, comment);
                                 }
                                 prevStatement.remove();
-                                NameExpr replacedReturnExpression = matchingReturnValues.get(0);
                                 replacedReturnExpression.replace(assignExpr.getValue());
                                 returnedVariables.remove(replacedReturnExpression);
                                 continueOptimizing = true;

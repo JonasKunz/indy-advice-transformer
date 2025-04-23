@@ -99,6 +99,11 @@ public class TransformTestSources {
     }
 
     @Test
+    public void wrapArgumentAdvice() {
+        transformAndPrintDiff("/WrapArgumentAdvice.java");
+    }
+
+    @Test
     public void preserveAssignmentOrderInReturn() {
         transformAndPrintDiff("/PreserveOrderInOptimizedReturns.java");
     }
