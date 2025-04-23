@@ -41,8 +41,8 @@ import com.github.javaparser.symbolsolver.javaparsermodel.declarations.JavaParse
 import com.google.common.collect.Streams;
 import net.bytebuddy.asm.Advice;
 
+import javax.annotation.Nullable;
 import java.util.ArrayList;
-import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
@@ -180,7 +180,48 @@ public class AdviceTransformationPlan {
         }
         exitReturnValues.forEach(val -> removeParameterOrVariableIfNeverUsed(exitMethod, val.parameterOrVariable()));
 
+        ensureParametersAreReadOnly(enterMethod);
+        ensureParametersAreReadOnly(exitMethod);
+
         return true;
+    }
+
+    /**
+     * Ensures that @Advice.Argument, @Advice.FieldValue and @Advice.ReturnValue parameters are never written.
+     * This is only required if the advice is inlined, because in that case bytebuddy does not allow writing to the parameters.
+     */
+    private void ensureParametersAreReadOnly(@Nullable MethodDeclaration method) {
+        if (method == null) {
+            return;
+        }
+        List<Parameter> parameters = new ArrayList<>(method.getParameters());
+        // Iterate in reverse order to keep the local var declarations in the same order as the parameters
+        Collections.reverse(parameters);
+        for (Parameter parameter : parameters) {
+            if ( Utils.hasAnnotation(parameter, ADVICE_ARGUMENT, typeSolver) ||
+                 Utils.hasAnnotation(parameter, ADVICE_FIELDVALUE, typeSolver) ||
+                 Utils.hasAnnotation(parameter, ADVICE_RETURN, typeSolver)
+                 ) {
+                // Look for all assignment expressions with the name on the LHS
+                AtomicBoolean isWrittenTo = new AtomicBoolean(false);
+                BlockStmt body = method.getBody().get();
+                body.walk(AssignExpr.class, assignment -> {
+                    Expression target = assignment.getTarget();
+                    if (target instanceof NameExpr assignedVar && assignedVar.getNameAsString().equals(parameter.getNameAsString())) {
+                        // we are conservative: the name might resolve to e.g. a shadowing local variable, but we rename anyways
+                        isWrittenTo.set(true);
+                    }
+                });
+                if (isWrittenTo.get()) {
+                    // Introduce a new local variable to be used instead, rename the parameter with "Original" suffix
+                    String localVarName = parameter.getNameAsString();
+                    String parameterName = "original" + Character.toUpperCase(localVarName.charAt(0)) + localVarName.substring(1);
+                    parameter.setName(parameterName);
+                    VariableDeclarator localDeclarator = new VariableDeclarator(parameter.getType(), localVarName, new NameExpr(parameterName));
+                    body.addAndGetStatement(0, new ExpressionStmt(new VariableDeclarationExpr(localDeclarator)));
+                }
+            }
+        }
     }
 
     private static Stream<Parameter> findNonReadOnlyParameters(MethodDeclaration method, String annotationFqn, TypeSolver typeSolver) {
